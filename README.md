@@ -2,4 +2,4 @@
 
 Python implementation of Central Pattern Generator (CPG). Can be used for robot control
 
-![image](https://github.com/Bigpig4396/Central_Pattern_Generator_CPG/0.gif)
+![image](https://github.com/Bigpig4396/Central_Pattern_Generator_CPG/blob/main/0.gif)
