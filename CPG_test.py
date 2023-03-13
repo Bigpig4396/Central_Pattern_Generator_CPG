@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
 class CPG:
-    def __init__(self, n, R, omega, mu, a, dp, init_phi, offset):
+    def __init__(self, n, R, omega, mu, a, dp, init_phi, offset, lower_lim=None, upper_lim=None):
         self.n = n          # number of channels
         self.mu = mu        # (n, 1), phase convergence rate
         self.a = a          # (n, 1), amplitude convergence rate
@@ -25,9 +25,19 @@ class CPG:
         self.B[1:n, :n - 1] -= np.eye(n-1)
         self.offset = offset
 
+        self.is_lower_lim = False
+        if lower_lim is not None:
+            self.is_lower_lim = True
+            self.lower_lim = lower_lim
+
+        self.is_upper_lim = False
+        if upper_lim is not None:
+            self.is_upper_lim = True
+            self.upper_lim = upper_lim
+
         # state variables
         self.d_r = np.zeros((self.n, 1))
-        self.r = self.R  # amplitude variable
+        self.r = self.R  # amplitude variable, (n, 1)
         self.d_phi = np.zeros((self.n, 1))
         self.phi = init_phi     # phases
 
@@ -39,6 +49,9 @@ class CPG:
 
     def set_phase_shift(self, dp):
         self.dp = dp / 2
+
+    def set_off_set(self, offset):
+        self.offset = offset
 
     def update_r(self):
         # update amplitude
@@ -61,7 +74,12 @@ class CPG:
         self.r = self.R  # amplitude variable
 
     def output(self):
-        return self.r*np.sin(self.phi)+self.offset
+        x = self.r*np.sin(self.phi)+self.offset
+        if self.is_lower_lim:
+            x = np.clip(x, a_min=self.lower_lim, a_max=None)
+        if self.is_upper_lim:
+            x = np.clip(x, a_min=None, a_max=self.upper_lim)
+        return x
 
     def output_phase(self):
         return self.phi
@@ -75,7 +93,9 @@ if __name__ == "__main__":
               a=np.array([[0.1], [0.1], [0.1], [0.1], [0.1]]),
               dp=np.array([[math.pi/5], [math.pi/5], [math.pi/5], [math.pi/5]]),
               init_phi=np.zeros((n_joints, 1)),
-              offset=np.zeros((n_joints, 1)))
+              offset=np.zeros((n_joints, 1)),
+              lower_lim=-0.5*np.ones((5,1)),
+              upper_lim=0.5*np.ones((5,1)))
 
     trail = 3   # choose one example
 
