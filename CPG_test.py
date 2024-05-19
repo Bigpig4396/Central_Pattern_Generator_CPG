@@ -4,25 +4,28 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
 class CPG:
-    def __init__(self, n, R, omega, mu, a, dp, init_phi, offset, lower_lim=None, upper_lim=None):
-        self.n = n          # number of channels
-        self.mu = mu        # (n, 1), phase convergence rate
-        self.a = a          # (n, 1), amplitude convergence rate
-        self.dp = dp/2        # (n-1, 1), phase shift between neighbour joints
-        self.R = R          # (n, 1), target amplitudes
+    def __init__(self, n, R, omega, mu, a, dp, init_phi, offset, dt, lower_lim=None, upper_lim=None):
+        self.n = n  # number of channels
+        self.dt = dt    # simulation step
+        self.mu = mu  # (n, 1), phase convergence rate
+        self.a = a  # (n, 1), amplitude convergence rate
+        self.dp = dp  # (n-1, 1), phase shift between neighbour joints
+        self.R = R  # (n, 1), target amplitudes
         self.omega = omega  # (n, 1), target frequencies
 
         self.A = np.zeros((n, n))
         for i in range(n):
-            self.A[i, i] = -2*self.mu[i, 0]
+            self.A[i, i] = -2 * self.mu[i, 0]
         self.A[0, 0] += self.mu[0, 0]
-        self.A[n-1, n-1] += self.mu[n-1, 0]
-        for i in range(n-1):
-            self.A[i, i+1] = self.mu[i, 0]
-            self.A[i+1, i] = self.mu[i + 1, 0]
-        self.B = np.zeros((n, n-1))
-        self.B[:n-1,:n-1] += np.eye(n-1)
-        self.B[1:n, :n - 1] -= np.eye(n-1)
+        self.A[n - 1, n - 1] += self.mu[n - 1, 0]
+        for i in range(n - 1):
+            self.A[i, i + 1] = self.mu[i, 0]
+            self.A[i + 1, i] = self.mu[i + 1, 0]
+        self.B = np.zeros((n, n - 1))
+        self.B[:n - 1, :n - 1] += np.eye(n - 1)
+        self.B[1:n, :n - 1] -= np.eye(n - 1)
+        for i in range(n):
+            self.B[i, :] *= self.mu[i, 0]
         self.offset = offset
 
         self.is_lower_lim = False
@@ -37,9 +40,10 @@ class CPG:
 
         # state variables
         self.d_r = np.zeros((self.n, 1))
-        self.r = self.R  # amplitude variable, (n, 1)
+        # self.r = self.R  # amplitude variable, (n, 1)
+        self.r = np.zeros_like(self.R)
         self.d_phi = np.zeros((self.n, 1))
-        self.phi = init_phi     # phases
+        self.phi = init_phi  # phases
 
     def set_amp(self, R):
         self.R = R
@@ -48,7 +52,7 @@ class CPG:
         self.omega = omega
 
     def set_phase_shift(self, dp):
-        self.dp = dp / 2
+        self.dp = dp
 
     def set_off_set(self, offset):
         self.offset = offset
@@ -56,13 +60,13 @@ class CPG:
     def update_r(self):
         # update amplitude
         dd_r = self.a*(self.a*(self.R-self.r) - self.d_r)
-        self.d_r += dd_r
-        self.r += self.d_r
+        self.d_r += dd_r * self.dt
+        self.r += self.d_r * self.dt
 
     def update_phi(self):
         # update phase
         self.d_phi = self.omega + self.A.dot(self.phi) + self.B.dot(self.dp)
-        self.phi += self.d_phi
+        self.phi += self.d_phi * dt
 
     def update(self):
         self.update_phi()
@@ -84,154 +88,111 @@ class CPG:
     def output_phase(self):
         return self.phi
 
+    def get_dp(self):
+        dp = np.zeros((self.n-1, 1))
+        for i in range(self.n-1):
+            dp[i, 0] = self.phi[i, 0] - self.phi[i+1, 0]
+        return dp
+
 if __name__ == "__main__":
-    n_joints = 5
+    n_joints = 11
+    dt = 0.005
+
+    t = np.arange(0, 5, dt)
+    tar_x = np.array([[60, 14, 60, 14, 60, 14, 60, 14, 60, 14, 60]]).T * math.pi / 180 * np.sin(
+        np.array([[2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]]).T * math.pi * 2 * t
+        + np.array([[0, 0, 1, 1, 2, 2, 3, 3, 0, 0, 1]]).T / 2 * math.pi)
+
+    R = np.array([[60, 14, 60, 14, 60, 14, 60, 14, 60, 14, 60]]).T * math.pi / 180
+    omega = 2 * math.pi * np.array([[2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]]).T
+    init_phi = np.array([[0, 0, 1, 1, 2, 2, 3, 3, 0, 0, 1]]).T / 2 * math.pi
     cpg = CPG(n=n_joints,
-              R=np.array([[1.0], [1.0], [1.0], [1.0], [1.0]]),
-              omega=np.array([[0.1], [0.1], [0.1], [0.1], [0.1]]),
-              mu=np.array([[0.5], [0.5], [0.5], [0.5], [0.5]]),
-              a=np.array([[0.1], [0.1], [0.1], [0.1], [0.1]]),
-              dp=np.array([[math.pi/5], [math.pi/5], [math.pi/5], [math.pi/5]]),
-              init_phi=np.zeros((n_joints, 1)),
+              R=R,
+              omega=omega,
+              mu=5*np.array([[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]]).T,
+              a=5*np.array([[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]]).T,
+              dp=np.array([[0, -1, 0, -1, 0, -1, 0, -1, 0, -1]]).T / 2 * math.pi,
+              init_phi=np.array([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1]]).T / 2 * math.pi,
               offset=np.zeros((n_joints, 1)),
-              lower_lim=-0.5*np.ones((5,1)),
-              upper_lim=0.5*np.ones((5,1)))
+              dt=dt,
+              lower_lim=-5 * np.ones((n_joints, 1)),
+              upper_lim=5 * np.ones((n_joints, 1)))
+    print('A', cpg.A)
+    print('B', cpg.B)
+    x = np.zeros((n_joints, 1))
+    real_dp = np.zeros((n_joints-1, 1))
+    real_r = np.zeros((n_joints, 1))
+    for i in range(len(t)):
+        cpg.update()
+        new_x = cpg.output()
+        x = np.hstack((x, new_x))
+        new_dp = cpg.get_dp()
+        real_dp = np.hstack((real_dp, new_dp))
+        real_r = np.hstack((real_r, cpg.r))
+    x = x[:, 1:]
+    real_dp = real_dp[:, 1:]
+    real_r = real_r[:, 1:]
+    print('cpg.r', cpg.r)
 
-    trail = 3   # choose one example
+    fig = plt.figure()
+    gs = GridSpec(1, 2, figure=fig)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.plot(t, tar_x.T, linewidth=1.0)
+    ax1 = fig.add_subplot(gs[0, 1])
+    ax1.plot(t, x.T, linewidth=1.0)
+    plt.title('comparison between the reference signal and tracking signal')
+    plt.show()
 
-    if trail == 0:      # deferent frequencies
-        x = np.zeros((n_joints, 1))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
+    fig = plt.figure()
+    gs = GridSpec(6, 2, figure=fig)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.plot(t, tar_x.T, linewidth=1.0)
+    for i in range(5):
+        ax1 = fig.add_subplot(gs[i + 1, 0])
+        ax1.plot(t, tar_x.T[:, i], linewidth=1.0)
+        ax1.plot(t, x.T[:, i], linewidth=1.0)
+        ax1.set_title('joint ' + str(i))
+    for i in range(6):
+        ax1 = fig.add_subplot(gs[i, 1])
+        ax1.plot(t, tar_x.T[:, i + 5], linewidth=1.0)
+        ax1.plot(t, x.T[:, i+5], linewidth=1.0)
+        ax1.set_title('joint ' + str(i + 5))
+    plt.title('reference')
+    plt.show()
 
-        cpg.set_freq(0.2*np.ones((n_joints, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
+    fig = plt.figure()
+    gs = GridSpec(5, 2, figure=fig)
+    ref_dp = np.array([[0, -1, 0, -1, 0, -1, 0, -1, 0, -1]])
+    ref_dp = np.tile(ref_dp, (x.shape[1], 1))
+    for i in range(5):
+        ax1 = fig.add_subplot(gs[i, 0])
+        ax1.plot(t, real_dp.T[:, i] * 2 / math.pi, linewidth=1.0)
+        ax1.plot(t, ref_dp[:, i], linewidth=1.0)
+        ax1.set_title('theta ' + str(i))
+        ax1.set_ylim(-2, 2)
+    for i in range(5):
+        ax1 = fig.add_subplot(gs[i, 1])
+        ax1.plot(t, real_dp.T[:, i + 5] * 2 / math.pi, linewidth=1.0)
+        ax1.plot(t, ref_dp[:, i + 5], linewidth=1.0)
+        ax1.set_title('theta ' + str(i+5))
+        ax1.set_ylim(-2, 2)
+    plt.title('tracking the difference of phases')
+    plt.show()
 
-        cpg.set_freq(0.05 * np.ones((n_joints, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        fig = plt.figure()
-        gs = GridSpec(n_joints, 1, figure=fig)
-        for i in range(n_joints):
-            ax1 = fig.add_subplot(gs[i, 0])
-            ax1.plot(x[i, 1:])
-        plt.title('frequencies, 0.1, 0.2, 0.05')
-        plt.show()
-
-    elif trail == 1:        # amplitude transition
-        x = np.zeros((n_joints, 1))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        cpg.set_amp(2 * np.ones((n_joints, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        cpg.set_amp(3 * np.ones((n_joints, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        fig = plt.figure()
-        gs = GridSpec(n_joints, 1, figure=fig)
-        for i in range(n_joints):
-            ax1 = fig.add_subplot(gs[i, 0])
-            ax1.plot(x[i, 1:])
-        plt.title('amplitude, 1, 2, 3')
-        plt.show()
-
-    elif trail == 2: # combination of frequency and amplitude
-        x = np.zeros((n_joints, 1))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        cpg.set_freq(0.2 * np.ones((n_joints, 1)))
-        cpg.set_amp(2 * np.ones((n_joints, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        cpg.set_freq(0.05 * np.ones((n_joints, 1)))
-        cpg.set_amp(3 * np.ones((n_joints, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        fig = plt.figure()
-        gs = GridSpec(n_joints, 1, figure=fig)
-        for i in range(n_joints):
-            ax1 = fig.add_subplot(gs[i, 0])
-            ax1.plot(x[i, 1:])
-        plt.title('frequencies, 0.1, 0.2, 0.05, amplitude, 1, 2, 3')
-        plt.show()
-
-    elif trail == 3:
-        x = np.zeros((n_joints, 1))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        cpg.set_phase_shift(math.pi/2*np.ones((n_joints-1, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        cpg.set_phase_shift(math.pi * np.ones((n_joints - 1, 1)))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        fig = plt.figure()
-        gs = GridSpec(n_joints, 1, figure=fig)
-        for i in range(n_joints):
-            ax1 = fig.add_subplot(gs[i, 0])
-            ax1.plot(x[i, 1:])
-        plt.title('frequencies, 0.1, 0.2, 0.05, amplitude, 1, 2, 3')
-        plt.show()
-
-    elif trail == 4:
-        # cpg.reset(np.ones((n_joints, 1)))
-        x = np.zeros((n_joints, 1))
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        for i in range(200):
-            cpg.update()
-            new_x = cpg.output()
-            x = np.hstack((x, new_x))
-
-        fig = plt.figure()
-        gs = GridSpec(n_joints, 1, figure=fig)
-        for i in range(n_joints):
-            ax1 = fig.add_subplot(gs[i, 0])
-            ax1.plot(x[i, 1:])
-        plt.title('initial phase')
-        plt.show()
+    fig = plt.figure()
+    gs = GridSpec(6, 2, figure=fig)
+    ref_R = np.array([[60, 14, 60, 14, 60, 14, 60, 14, 60, 14, 60]])
+    ref_R = np.tile(ref_R, (x.shape[1], 1))
+    for i in range(6):
+        ax1 = fig.add_subplot(gs[i, 0])
+        ax1.plot(t, real_r.T[:, i], linewidth=1.0)
+        ax1.plot(t, ref_R[:, i] * math.pi / 180, linewidth=1.0)
+        ax1.set_title('r ' + str(i))
+    for i in range(5):
+        ax1 = fig.add_subplot(gs[i, 1])
+        ax1.plot(t, real_r.T[:, i + 6], linewidth=1.0)
+        ax1.plot(t, ref_R[:, i + 6] * math.pi / 180, linewidth=1.0)
+        ax1.set_title('r ' + str(i + 6))
+    plt.title('tracking amplitude')
+    plt.show()
 
